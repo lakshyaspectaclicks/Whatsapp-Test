@@ -96,7 +96,7 @@ async function sendLatestEstimate(to, userName) {
   const filename = "estimate_march_2026.pdf";
 
   const paymentLink =
-    "https://payments.example.com/pay/EST2026MAR";
+    "https://rzp.io/rzp/bWvWtihJ";
 
   await sendTextMessage(
     to,
@@ -116,17 +116,17 @@ const estimates = {
 
   jan: {
     filename: "estimate_jan_2026.pdf",
-    paymentLink: "https://payments.example.com/pay/EST2026JAN"
+    paymentLink: "https://rzp.io/rzp/bWvWtihJ"
   },
 
   feb: {
     filename: "estimate_feb_2026.pdf",
-    paymentLink: "https://payments.example.com/pay/EST2026FEB"
+    paymentLink: "https://rzp.io/rzp/bWvWtihJ"
   },
 
   mar: {
     filename: "estimate_mar_2026.pdf",
-    paymentLink: "https://payments.example.com/pay/EST2026MAR"
+    paymentLink: "https://rzp.io/rzp/bWvWtihJ"
   }
 
 };
