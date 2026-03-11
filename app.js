@@ -12,7 +12,11 @@ const defaultRecipient = process.env.TEST_RECIPIENT;
 
 const GRAPH_BASE_URL = `https://graph.facebook.com/${graphVersion}/${phoneNumberId}`;
 
+/**
+ * Generic WhatsApp sender
+ */
 async function sendWhatsAppMessage(payload) {
+
   const response = await fetch(`${GRAPH_BASE_URL}/messages`, {
     method: 'POST',
     headers: {
@@ -36,299 +40,279 @@ async function sendWhatsAppMessage(payload) {
   return data;
 }
 
-async function sendTextMessage(to, body, replyMessageId) {
-  const payload = {
+/**
+ * TEXT MESSAGE
+ */
+async function sendTextMessage(to, body) {
+  return sendWhatsAppMessage({
     to,
     type: 'text',
     text: {
       body,
-      preview_url: false,
-    },
-  };
-
-  if (replyMessageId) {
-    payload.context = { message_id: replyMessageId };
-  }
-
-  return sendWhatsAppMessage(payload);
-}
-
-/**
- * Image by public URL
- * Official Cloud API supports image.link.
- */
-async function sendImageMessageByLink(to, imageUrl, caption) {
-  return sendWhatsAppMessage({
-    to,
-    type: 'image',
-    image: {
-      link: imageUrl,
-      ...(caption ? { caption } : {}),
-    },
-  });
-}
-
-async function sendReplyButtons(to) {
-  return sendWhatsAppMessage({
-    to,
-    type: 'interactive',
-    interactive: {
-      type: 'button',
-      body: {
-        text: 'Choose an option',
-      },
-      action: {
-        buttons: [
-          {
-            type: 'reply',
-            reply: {
-              id: 'LANG_EN',
-              title: 'English',
-            },
-          },
-          {
-            type: 'reply',
-            reply: {
-              id: 'LANG_HI',
-              title: 'Hindi',
-            },
-          },
-        ],
-      },
-    },
+      preview_url: false
+    }
   });
 }
 
 /**
- * Template: testing_alert
- * Named body variable: {{user_name}}
- *
- * Meta's official syntax for named params includes parameter_name.
+ * TEMPLATE MESSAGE
+ * testing_alert
  */
 async function sendTestingAlertTemplate(to, userName) {
+
   return sendWhatsAppMessage({
-    recipient_type: 'individual',
+    recipient_type: "individual",
     to,
-    type: 'template',
+    type: "template",
     template: {
-      name: 'testing_alert',
+      name: "testing_alert",
       language: {
-        code: 'en',
+        code: "en"
       },
       components: [
         {
-          type: 'body',
+          type: "body",
           parameters: [
             {
-              type: 'text',
-              parameter_name: 'user_name',
-              text: userName,
-            },
-          ],
-        },
-      ],
-    },
+              type: "text",
+              parameter_name: "user_name",
+              text: userName
+            }
+          ]
+        }
+      ]
+    }
   });
 }
 
-async function markMessageAsRead(messageId) {
+/**
+ * DOCUMENT MESSAGE (PDF)
+ */
+async function sendDocumentMessage(to, pdfUrl, filename) {
+
   return sendWhatsAppMessage({
-    status: 'read',
-    message_id: messageId,
+    to,
+    type: "document",
+    document: {
+      link: pdfUrl,
+      filename
+    }
   });
+
 }
 
+/**
+ * PAYMENT LINK MESSAGE
+ */
+async function sendPaymentLinkMessage(to, paymentLink) {
+
+  return sendTextMessage(
+    to,
+    `💳 Pay your estimate using the link below:\n${paymentLink}`
+  );
+
+}
+
+/**
+ * SEND LATEST ESTIMATE FLOW
+ *
+ * template → pdf → payment link
+ */
+async function sendLatestEstimate(to, userName) {
+
+  const pdfUrl =
+    "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf";
+
+  const filename = "estimate_march_2026.pdf";
+
+  const paymentLink =
+    "https://payments.example.com/pay/EST2026MAR";
+
+  await sendTestingAlertTemplate(to, userName);
+
+  await sendDocumentMessage(to, pdfUrl, filename);
+
+  await sendPaymentLinkMessage(to, paymentLink);
+
+}
+
+/**
+ * SEND ESTIMATE BY MONTH
+ */
+async function sendEstimateByMonth(to, userName, month) {
+
+  const estimates = {
+
+    jan: {
+      filename: "estimate_jan_2026.pdf",
+      paymentLink: "https://payments.example.com/pay/EST2026JAN"
+    },
+
+    feb: {
+      filename: "estimate_feb_2026.pdf",
+      paymentLink: "https://payments.example.com/pay/EST2026FEB"
+    },
+
+    mar: {
+      filename: "estimate_mar_2026.pdf",
+      paymentLink: "https://payments.example.com/pay/EST2026MAR"
+    }
+
+  };
+
+  const estimate = estimates[month.toLowerCase()];
+
+  if (!estimate) {
+    throw new Error("Estimate for requested month not found");
+  }
+
+  const pdfUrl =
+    "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf";
+
+  await sendTestingAlertTemplate(to, userName);
+
+  await sendDocumentMessage(
+    to,
+    pdfUrl,
+    estimate.filename
+  );
+
+  await sendPaymentLinkMessage(
+    to,
+    estimate.paymentLink
+  );
+
+}
+
+/**
+ * WEBHOOK VERIFICATION
+ */
 app.get('/', (req, res) => {
+
   const mode = req.query['hub.mode'];
   const challenge = req.query['hub.challenge'];
   const token = req.query['hub.verify_token'];
 
   if (mode === 'subscribe' && token === verifyToken) {
-    console.log('WEBHOOK VERIFIED');
+    console.log("WEBHOOK VERIFIED");
     return res.status(200).send(challenge);
   }
 
   return res.sendStatus(403);
+
 });
 
+/**
+ * WEBHOOK RECEIVER
+ */
 app.post('/', async (req, res) => {
-  const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+
+  const timestamp =
+    new Date().toISOString().replace('T', ' ').slice(0, 19);
 
   console.log(`\nWebhook received ${timestamp}\n`);
   console.log(JSON.stringify(req.body, null, 2));
 
   res.sendStatus(200);
 
-  try {
-    if (req.body.object !== 'whatsapp_business_account') {
-      return;
-    }
-
-    const entries = req.body.entry || [];
-
-    for (const entry of entries) {
-      for (const change of entry.changes || []) {
-        if (change.field !== 'messages') continue;
-
-        const value = change.value || {};
-
-        for (const message of value.messages || []) {
-          console.log('Incoming message type:', message.type);
-          console.log('Incoming message id:', message.id);
-          console.log('From:', message.from);
-
-          await markMessageAsRead(message.id);
-
-          if (message.type === 'text') {
-            const userText = (message.text?.body || '').trim().toLowerCase();
-            console.log('User text:', userText);
-
-            if (userText === 'hi') {
-              await sendTextMessage(message.from, 'Hello from your test Node app');
-            } else if (userText === 'buttons') {
-              await sendReplyButtons(message.from);
-            } else if (userText === 'image') {
-              await sendImageMessageByLink(
-                message.from,
-                'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/Fronalpstock_big.jpg/800px-Fronalpstock_big.jpg',
-                'Sample image'
-              );
-            } else if (userText === 'template') {
-              await sendTestingAlertTemplate(message.from, 'Akash');
-            } else {
-              await sendTextMessage(
-                message.from,
-                'Send: hi, buttons, image, or template'
-              );
-            }
-          }
-
-          if (message.type === 'interactive') {
-            const buttonReply = message.interactive?.button_reply;
-            const listReply = message.interactive?.list_reply;
-
-            if (buttonReply) {
-              console.log('Button reply id:', buttonReply.id);
-              console.log('Button reply title:', buttonReply.title);
-
-              await sendTextMessage(
-                message.from,
-                `You clicked ${buttonReply.title} (${buttonReply.id})`
-              );
-            }
-
-            if (listReply) {
-              console.log('List reply id:', listReply.id);
-              console.log('List reply title:', listReply.title);
-
-              await sendTextMessage(
-                message.from,
-                `You selected ${listReply.title} (${listReply.id})`
-              );
-            }
-          }
-        }
-
-        for (const status of value.statuses || []) {
-          console.log('Status event:', {
-            id: status.id,
-            status: status.status,
-            recipient_id: status.recipient_id,
-            timestamp: status.timestamp,
-          });
-        }
-      }
-    }
-  } catch (err) {
-    console.error('Webhook processing error:', err.message);
-    if (err.details) {
-      console.error(JSON.stringify(err.details, null, 2));
-    }
-  }
-});
-
-app.get('/send-text', async (req, res) => {
-  try {
-    const to = req.query.to || defaultRecipient;
-    const body = req.query.body || 'Hello from /send-text';
-
-    const data = await sendTextMessage(to, body);
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({
-      message: err.message,
-      details: err.details || null,
-    });
-  }
 });
 
 /**
- * Accept both:
- * - POST JSON body
- * - query params
+ * SEND TEXT (kept from previous version)
  */
-app.all('/send-image', async (req, res) => {
+app.get('/send-text', async (req, res) => {
+
   try {
-    const body = req.body || {};
-    const query = req.query || {};
 
-    const to = body.to || query.to || defaultRecipient;
-    const imageUrl = body.imageUrl || query.imageUrl;
-    const caption = body.caption || query.caption || '';
+    const to = req.query.to || defaultRecipient;
+    const body = req.query.body || "Hello from test API";
 
-    if (!imageUrl) {
+    const data = await sendTextMessage(to, body);
+
+    res.json(data);
+
+  } catch (err) {
+
+    res.status(500).json({
+      message: err.message,
+      details: err.details || null
+    });
+
+  }
+
+});
+
+/**
+ * SEND LATEST ESTIMATE
+ *
+ * POST /send-latest-estimate
+ */
+app.post('/send-latest-estimate', async (req, res) => {
+
+  try {
+
+    const to = req.body.to || defaultRecipient;
+    const userName = req.body.user_name || "Customer";
+
+    await sendLatestEstimate(to, userName);
+
+    res.json({
+      success: true,
+      message: "Latest estimate sent"
+    });
+
+  } catch (err) {
+
+    res.status(500).json({
+      message: err.message,
+      details: err.details || null
+    });
+
+  }
+
+});
+
+/**
+ * SEND ESTIMATE BY MONTH
+ *
+ * POST /send-estimate
+ */
+app.post('/send-estimate', async (req, res) => {
+
+  try {
+
+    const to = req.body.to || defaultRecipient;
+    const userName = req.body.user_name || "Customer";
+    const month = req.body.month;
+
+    if (!month) {
       return res.status(400).json({
-        message: 'imageUrl is required',
-        examples: {
-          postmanJson: {
-            to: '917718871474',
-            imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/Fronalpstock_big.jpg/800px-Fronalpstock_big.jpg',
-            caption: 'Sample image from Postman',
-          },
-          queryString:
-            '/send-image?to=917718871474&imageUrl=https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/Fronalpstock_big.jpg/800px-Fronalpstock_big.jpg&caption=Sample',
-        },
+        message: "month is required"
       });
     }
 
-    const data = await sendImageMessageByLink(to, imageUrl, caption);
-    res.json(data);
+    await sendEstimateByMonth(
+      to,
+      userName,
+      month
+    );
+
+    res.json({
+      success: true,
+      message: `Estimate for ${month} sent`
+    });
+
   } catch (err) {
+
     res.status(500).json({
       message: err.message,
-      details: err.details || null,
+      details: err.details || null
     });
-  }
-});
 
-app.get('/send-buttons', async (req, res) => {
-  try {
-    const to = req.query.to || defaultRecipient;
-    const data = await sendReplyButtons(to);
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({
-      message: err.message,
-      details: err.details || null,
-    });
   }
-});
 
-app.get('/send-template', async (req, res) => {
-  try {
-    const to = req.query.to || defaultRecipient;
-    const userName = req.query.user_name || 'Akash';
-
-    const data = await sendTestingAlertTemplate(to, userName);
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({
-      message: err.message,
-      details: err.details || null,
-    });
-  }
 });
 
 app.listen(port, () => {
-  console.log(`Listening on port ${port}`);
+  console.log(`Server running on port ${port}`);
 });
