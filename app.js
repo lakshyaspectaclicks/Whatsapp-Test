@@ -12,9 +12,6 @@ const defaultRecipient = process.env.TEST_RECIPIENT;
 
 const GRAPH_BASE_URL = `https://graph.facebook.com/${graphVersion}/${phoneNumberId}`;
 
-/**
- * Generic helper for POST /messages
- */
 async function sendWhatsAppMessage(payload) {
   const response = await fetch(`${GRAPH_BASE_URL}/messages`, {
     method: 'POST',
@@ -39,9 +36,6 @@ async function sendWhatsAppMessage(payload) {
   return data;
 }
 
-/**
- * 1) Send text message
- */
 async function sendTextMessage(to, body, replyMessageId) {
   const payload = {
     to,
@@ -60,8 +54,8 @@ async function sendTextMessage(to, body, replyMessageId) {
 }
 
 /**
- * 2) Send image message by public URL
- * Official Cloud API supports image.link for a publicly reachable asset.
+ * Image by public URL
+ * Official Cloud API supports image.link.
  */
 async function sendImageMessageByLink(to, imageUrl, caption) {
   return sendWhatsAppMessage({
@@ -74,9 +68,6 @@ async function sendImageMessageByLink(to, imageUrl, caption) {
   });
 }
 
-/**
- * 3) Send interactive reply buttons
- */
 async function sendReplyButtons(to) {
   return sendWhatsAppMessage({
     to,
@@ -109,9 +100,10 @@ async function sendReplyButtons(to) {
 }
 
 /**
- * 4) Send approved template message
  * Template: testing_alert
- * Body variables: only 1 => {{user_name}}
+ * Named body variable: {{user_name}}
+ *
+ * Meta's official syntax for named params includes parameter_name.
  */
 async function sendTestingAlertTemplate(to, userName) {
   return sendWhatsAppMessage({
@@ -129,6 +121,7 @@ async function sendTestingAlertTemplate(to, userName) {
           parameters: [
             {
               type: 'text',
+              parameter_name: 'user_name',
               text: userName,
             },
           ],
@@ -138,9 +131,6 @@ async function sendTestingAlertTemplate(to, userName) {
   });
 }
 
-/**
- * 5) Mark a message as read
- */
 async function markMessageAsRead(messageId) {
   return sendWhatsAppMessage({
     status: 'read',
@@ -148,9 +138,6 @@ async function markMessageAsRead(messageId) {
   });
 }
 
-/**
- * GET webhook verification
- */
 app.get('/', (req, res) => {
   const mode = req.query['hub.mode'];
   const challenge = req.query['hub.challenge'];
@@ -164,9 +151,6 @@ app.get('/', (req, res) => {
   return res.sendStatus(403);
 });
 
-/**
- * POST webhook receiver
- */
 app.post('/', async (req, res) => {
   const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
@@ -204,14 +188,13 @@ app.post('/', async (req, res) => {
             } else if (userText === 'buttons') {
               await sendReplyButtons(message.from);
             } else if (userText === 'image') {
-              // Smaller public image URL
               await sendImageMessageByLink(
                 message.from,
                 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/Fronalpstock_big.jpg/800px-Fronalpstock_big.jpg',
                 'Sample image'
               );
             } else if (userText === 'template') {
-              await sendTestingAlertTemplate(message.from, 'Test User');
+              await sendTestingAlertTemplate(message.from, 'Akash');
             } else {
               await sendTextMessage(
                 message.from,
@@ -264,10 +247,6 @@ app.post('/', async (req, res) => {
   }
 });
 
-/**
- * Test endpoint: send text
- * GET /send-text?to=91...&body=hello
- */
 app.get('/send-text', async (req, res) => {
   try {
     const to = req.query.to || defaultRecipient;
@@ -284,29 +263,30 @@ app.get('/send-text', async (req, res) => {
 });
 
 /**
- * Test endpoint: send image dynamically from Postman
- * POST /send-image
- * Content-Type: application/json
- * Body:
- * {
- *   "to": "91XXXXXXXX",
- *   "imageUrl": "https://example.com/image.jpg",
- *   "caption": "Any caption"
- * }
+ * Accept both:
+ * - POST JSON body
+ * - query params
  */
-app.post('/send-image', async (req, res) => {
+app.all('/send-image', async (req, res) => {
   try {
-    const to = req.body.to || req.query.to || defaultRecipient;
-    const imageUrl = req.body.imageUrl || req.query.imageUrl;
-    const caption = req.body.caption || req.query.caption || '';
+    const body = req.body || {};
+    const query = req.query || {};
+
+    const to = body.to || query.to || defaultRecipient;
+    const imageUrl = body.imageUrl || query.imageUrl;
+    const caption = body.caption || query.caption || '';
 
     if (!imageUrl) {
       return res.status(400).json({
         message: 'imageUrl is required',
-        example: {
-          to: '91XXXXXXXX',
-          imageUrl: 'https://example.com/image.jpg',
-          caption: 'Sample image from Postman',
+        examples: {
+          postmanJson: {
+            to: '917718871474',
+            imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/Fronalpstock_big.jpg/800px-Fronalpstock_big.jpg',
+            caption: 'Sample image from Postman',
+          },
+          queryString:
+            '/send-image?to=917718871474&imageUrl=https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/Fronalpstock_big.jpg/800px-Fronalpstock_big.jpg&caption=Sample',
         },
       });
     }
@@ -321,10 +301,6 @@ app.post('/send-image', async (req, res) => {
   }
 });
 
-/**
- * Test endpoint: send buttons
- * GET /send-buttons?to=91...
- */
 app.get('/send-buttons', async (req, res) => {
   try {
     const to = req.query.to || defaultRecipient;
@@ -338,14 +314,10 @@ app.get('/send-buttons', async (req, res) => {
   }
 });
 
-/**
- * Test endpoint: send template testing_alert
- * GET /send-template?to=91...&user_name=Akash
- */
 app.get('/send-template', async (req, res) => {
   try {
     const to = req.query.to || defaultRecipient;
-    const userName = req.query.user_name || 'Test User';
+    const userName = req.query.user_name || 'Akash';
 
     const data = await sendTestingAlertTemplate(to, userName);
     res.json(data);
