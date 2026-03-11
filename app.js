@@ -41,7 +41,6 @@ async function sendWhatsAppMessage(payload) {
 
 /**
  * 1) Send text message
- * Official shape: type=text, text={ body, preview_url }
  */
 async function sendTextMessage(to, body, replyMessageId) {
   const payload = {
@@ -61,8 +60,8 @@ async function sendTextMessage(to, body, replyMessageId) {
 }
 
 /**
- * 2) Send image message
- * Official shape allows a Meta-hosted media id OR external link
+ * 2) Send image message by public URL
+ * Official Cloud API supports image.link for a publicly reachable asset.
  */
 async function sendImageMessageByLink(to, imageUrl, caption) {
   return sendWhatsAppMessage({
@@ -70,15 +69,13 @@ async function sendImageMessageByLink(to, imageUrl, caption) {
     type: 'image',
     image: {
       link: imageUrl,
-      caption,
+      ...(caption ? { caption } : {}),
     },
   });
 }
 
 /**
  * 3) Send interactive reply buttons
- * Official interactive type: button
- * Up to 3 reply buttons
  */
 async function sendReplyButtons(to) {
   return sendWhatsAppMessage({
@@ -113,17 +110,18 @@ async function sendReplyButtons(to) {
 
 /**
  * 4) Send approved template message
- * Template must already exist, be approved, and enabled
+ * Template: testing_alert
+ * Body variables: only 1 => {{user_name}}
  */
-async function sendTemplateMessage(to, templateName, languageCode, bodyTextParam) {
+async function sendTestingAlertTemplate(to, userName) {
   return sendWhatsAppMessage({
+    recipient_type: 'individual',
     to,
     type: 'template',
     template: {
-      name: templateName,
+      name: 'testing_alert',
       language: {
-        policy: 'deterministic',
-        code: languageCode,
+        code: 'en',
       },
       components: [
         {
@@ -131,7 +129,7 @@ async function sendTemplateMessage(to, templateName, languageCode, bodyTextParam
           parameters: [
             {
               type: 'text',
-              text: bodyTextParam,
+              text: userName,
             },
           ],
         },
@@ -142,7 +140,6 @@ async function sendTemplateMessage(to, templateName, languageCode, bodyTextParam
 
 /**
  * 5) Mark a message as read
- * Official capability: mark message as read
  */
 async function markMessageAsRead(messageId) {
   return sendWhatsAppMessage({
@@ -176,7 +173,6 @@ app.post('/', async (req, res) => {
   console.log(`\nWebhook received ${timestamp}\n`);
   console.log(JSON.stringify(req.body, null, 2));
 
-  // Acknowledge quickly
   res.sendStatus(200);
 
   try {
@@ -192,32 +188,30 @@ app.post('/', async (req, res) => {
 
         const value = change.value || {};
 
-        // Incoming user messages
         for (const message of value.messages || []) {
           console.log('Incoming message type:', message.type);
           console.log('Incoming message id:', message.id);
           console.log('From:', message.from);
 
-          // Optional: mark inbound message as read
           await markMessageAsRead(message.id);
 
           if (message.type === 'text') {
-            const userText = message.text?.body || '';
+            const userText = (message.text?.body || '').trim().toLowerCase();
             console.log('User text:', userText);
 
-            if (userText.toLowerCase() === 'hi') {
+            if (userText === 'hi') {
               await sendTextMessage(message.from, 'Hello from your test Node app');
-            } else if (userText.toLowerCase() === 'buttons') {
+            } else if (userText === 'buttons') {
               await sendReplyButtons(message.from);
-            } else if (userText.toLowerCase() === 'image') {
+            } else if (userText === 'image') {
+              // Smaller public image URL
               await sendImageMessageByLink(
                 message.from,
-                'https://upload.wikimedia.org/wikipedia/commons/3/3f/Fronalpstock_big.jpg',
+                'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/Fronalpstock_big.jpg/800px-Fronalpstock_big.jpg',
                 'Sample image'
               );
-            } else if (userText.toLowerCase() === 'template') {
-              // Replace hello_world with your approved template if needed
-              await sendTemplateMessage(message.from, 'hello_world', 'en_US', 'demo');
+            } else if (userText === 'template') {
+              await sendTestingAlertTemplate(message.from, 'Test User');
             } else {
               await sendTextMessage(
                 message.from,
@@ -226,7 +220,6 @@ app.post('/', async (req, res) => {
             }
           }
 
-          // Interactive button replies
           if (message.type === 'interactive') {
             const buttonReply = message.interactive?.button_reply;
             const listReply = message.interactive?.list_reply;
@@ -253,7 +246,6 @@ app.post('/', async (req, res) => {
           }
         }
 
-        // Delivery / read / failed statuses
         for (const status of value.statuses || []) {
           console.log('Status event:', {
             id: status.id,
@@ -265,7 +257,7 @@ app.post('/', async (req, res) => {
       }
     }
   } catch (err) {
-    console.error('Webhook processing error:', err);
+    console.error('Webhook processing error:', err.message);
     if (err.details) {
       console.error(JSON.stringify(err.details, null, 2));
     }
@@ -273,54 +265,95 @@ app.post('/', async (req, res) => {
 });
 
 /**
- * Simple test endpoints so you can trigger sends from browser/Postman
+ * Test endpoint: send text
+ * GET /send-text?to=91...&body=hello
  */
 app.get('/send-text', async (req, res) => {
   try {
     const to = req.query.to || defaultRecipient;
     const body = req.query.body || 'Hello from /send-text';
+
     const data = await sendTextMessage(to, body);
     res.json(data);
   } catch (err) {
-    res.status(500).json({ message: err.message, details: err.details || null });
+    res.status(500).json({
+      message: err.message,
+      details: err.details || null,
+    });
   }
 });
 
-app.get('/send-image', async (req, res) => {
+/**
+ * Test endpoint: send image dynamically from Postman
+ * POST /send-image
+ * Content-Type: application/json
+ * Body:
+ * {
+ *   "to": "91XXXXXXXX",
+ *   "imageUrl": "https://example.com/image.jpg",
+ *   "caption": "Any caption"
+ * }
+ */
+app.post('/send-image', async (req, res) => {
   try {
-    const to = req.query.to || defaultRecipient;
-    const data = await sendImageMessageByLink(
-      to,
-      'https://upload.wikimedia.org/wikipedia/commons/3/3f/Fronalpstock_big.jpg',
-      'Sample image from test app'
-    );
+    const to = req.body.to || req.query.to || defaultRecipient;
+    const imageUrl = req.body.imageUrl || req.query.imageUrl;
+    const caption = req.body.caption || req.query.caption || '';
+
+    if (!imageUrl) {
+      return res.status(400).json({
+        message: 'imageUrl is required',
+        example: {
+          to: '91XXXXXXXX',
+          imageUrl: 'https://example.com/image.jpg',
+          caption: 'Sample image from Postman',
+        },
+      });
+    }
+
+    const data = await sendImageMessageByLink(to, imageUrl, caption);
     res.json(data);
   } catch (err) {
-    res.status(500).json({ message: err.message, details: err.details || null });
+    res.status(500).json({
+      message: err.message,
+      details: err.details || null,
+    });
   }
 });
 
+/**
+ * Test endpoint: send buttons
+ * GET /send-buttons?to=91...
+ */
 app.get('/send-buttons', async (req, res) => {
   try {
     const to = req.query.to || defaultRecipient;
     const data = await sendReplyButtons(to);
     res.json(data);
   } catch (err) {
-    res.status(500).json({ message: err.message, details: err.details || null });
+    res.status(500).json({
+      message: err.message,
+      details: err.details || null,
+    });
   }
 });
 
+/**
+ * Test endpoint: send template testing_alert
+ * GET /send-template?to=91...&user_name=Akash
+ */
 app.get('/send-template', async (req, res) => {
   try {
     const to = req.query.to || defaultRecipient;
-    const templateName = req.query.name || 'hello_world';
-    const lang = req.query.lang || 'en_US';
-    const bodyParam = req.query.param || 'demo';
+    const userName = req.query.user_name || 'Test User';
 
-    const data = await sendTemplateMessage(to, templateName, lang, bodyParam);
+    const data = await sendTestingAlertTemplate(to, userName);
     res.json(data);
   } catch (err) {
-    res.status(500).json({ message: err.message, details: err.details || null });
+    res.status(500).json({
+      message: err.message,
+      details: err.details || null,
+    });
   }
 });
 
